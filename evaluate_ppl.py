@@ -69,11 +69,13 @@ def calculate_perplexity_original(model_name: str, texts: list, device: str = "c
     
     total_loss = 0.0
     total_tokens = 0
+    total_samples = len(texts)
     
     with torch.no_grad():
-        for i, text in enumerate(texts):
-            if i % 10 == 0:
-                print(f"  Processing {i}/{len(texts)}...")
+        for i, text in enumerate(texts, start=1):
+            # Inline progress bar
+            progress = (i / total_samples) * 100
+            print(f"\r  Progress: {progress:5.1f}% ({i}/{total_samples})", end="", flush=True)
             
             # Tokenize
             inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=512)
@@ -85,6 +87,8 @@ def calculate_perplexity_original(model_name: str, texts: list, device: str = "c
             
             total_loss += loss.item() * inputs["input_ids"].shape[1]
             total_tokens += inputs["input_ids"].shape[1]
+    
+    print("\r  Progress: 100.0% (done)     ")  # finalize line
     
     avg_loss = total_loss / total_tokens
     perplexity = np.exp(avg_loss)
