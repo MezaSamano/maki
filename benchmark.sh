@@ -101,7 +101,21 @@ while [[ $# -gt 0 ]]; do
         --benchmark-only)
             SKIP_COMPRESS=true
             shift
-            ;;skip-compress   Skip compression, use existing .lort files"
+            ;;
+        --measure-ppl)
+            MEASURE_PPL=true
+            shift
+            ;;
+        --help)
+            echo "LoRT Compression Benchmark Suite"
+            echo ""
+            echo "Usage: ./benchmark.sh [OPTIONS]"
+            echo ""
+            echo "Options:"
+            echo "  --quick           Run quick benchmark (Qwen 0.5B only)"
+            echo "  --large           Include large models (7B+)"
+            echo "  --model MODEL     Benchmark specific model"
+            echo "  --skip-compress   Skip compression, use existing .lort files"
             echo "  --benchmark-only  Same as --skip-compress"
             echo "  --measure-ppl     Measure perplexity (requires Python & transformers)"
             echo "  --help            Show this help"
@@ -111,21 +125,7 @@ while [[ $# -gt 0 ]]; do
             echo "  ./benchmark.sh --quick                   # Quick test"
             echo "  ./benchmark.sh --model 'Qwen/Qwen2.5-0.5B'"
             echo "  ./benchmark.sh --skip-compress           # Benchmark existing files"
-            echo "  ./benchmark.sh --measure-ppl             # Include perplexity metrics
-            echo "LoRT Compression Benchmark Suite"
-            echo ""
-            echo "Usage: ./benchmark.sh [OPTIONS]"
-            echo ""
-            echo "Options:"
-            echo "  --quick           Run quick benchmark (Qwen 0.5B only)"
-            echo "  --large           Include large models (7B+)"
-            echo "  --model MODEL     Benchmark specific model"
-            echo "  --help            Show this help"
-            echo ""
-            echo "Examples:"
-            echo "  ./benchmark.sh                           # Standard benchmark"
-            echo "  ./benchmark.sh --quick                   # Quick test"
-            echo "  ./benchmark.sh --model 'Qwen/Qwen2.5-0.5B'"
+            echo "  ./benchmark.sh --measure-ppl             # Include perplexity metrics"
             exit 0
             ;;
         *)
