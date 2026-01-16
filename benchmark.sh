@@ -224,7 +224,8 @@ benchmark_model() {
     local model=$1
     local output_name=$(echo "$model" | tr '/' '-')
     local output_file="${COMPRESSED_DIR}/${output_name}.lort"
-    Check if skipping compression
+    
+    # Check if skipping compression
     if [ "$SKIP_COMPRESS" = true ]; then
         if [ ! -f "$output_file" ]; then
             log_error "Compressed file not found: $output_file"
