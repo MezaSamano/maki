@@ -204,6 +204,8 @@ sudo apt install -y \
   git \
   pkg-config \
   libssl-dev \
+  bc \
+  time \
   htop
 
 # Install Rust
@@ -223,7 +225,7 @@ pkg-config --version
 **💡 Running as root in Docker/container?** Remove `sudo` from the commands:
 
 ```bash
-# If you see "sudo: command not found", use these instead:
+# If you see "sudo: command not found", use these instead:bc time 
 apt update && apt upgrade -y
 apt install -y build-essential curl git pkg-config libssl-dev htop
 
@@ -247,6 +249,8 @@ pkg-config 0.xx.x
 - `libssl-dev`: OpenSSL development libraries (required for HTTPS/HuggingFace downloads)
 - `curl`: Downloads Rust installer
 - `git`: Clones the repository
+- `bc`: Calculator for benchmark script
+- `time`: Performance timing utility for benchmarks
 - `htop`: Resource monitoring (optional but useful)
 git version 2.xx.x
 ```
@@ -283,7 +287,28 @@ Options:
 
 ✅ **Build successful!** You're ready to compress models.
 
+---Running Benchmarks (Optional)
+
+For automated testing across multiple models:
+
+```bash
+# Make benchmark script executable
+chmod +x benchmark.sh
+
+# Quick benchmark (Qwen 0.5B only, ~2-3 min)
+./benchmark.sh --quick
+
+# Standard benchmark (3 models, ~20-30 min)
+./benchmark.sh
+
+# Results saved to benchmark_results/
+```
+
+See [BENCHMARKING.md](BENCHMARKING.md) for complete guide.
+
 ---
+
+## 🧪 
 
 ## 🧪 Testing with HuggingFace Models
 
@@ -641,7 +666,7 @@ sudo apt install -y build-essential pkg-config libssl-dev
 cargo clean
 cargo build --bin lort-compress --release
 ```
-
+ bc time
 2. **Update Rust:**
 ```bash
 rustup update stable
@@ -844,7 +869,9 @@ After completing the tests, verify:
 Now that you've successfully compressed models:
 
 1. **Compare different models**
-   - Test compression ratios across architectures
+   -Benchmarking Guide**: [BENCHMARKING.md](BENCHMARKING.md)
+- **Memory Mapping**: [MEMORY_MAPPING.md](MEMORY_MAPPING.md)
+- ** Test compression ratios across architectures
    - Find optimal `--min-dim` settings
    
 2. **Benchmark performance**
