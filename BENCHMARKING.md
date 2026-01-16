@@ -5,6 +5,16 @@ Complete guide for running and analyzing LoRT compression benchmarks in cloud en
 ## Quick Start
 
 ```bash
+# Install dependencies (if not already installed)
+# Ubuntu/Debian:
+apt update && apt install -y bc time
+
+# RHEL/CentOS/Fedora:
+yum install -y bc time
+
+# Alpine:
+apk add bc coreutils
+
 # Make script executable
 chmod +x benchmark.sh
 
@@ -367,6 +377,32 @@ crontab -e
 
 ## Troubleshooting
 
+### Missing Dependencies
+
+**Symptoms:**
+```
+./benchmark.sh: line 197: /usr/bin/time: No such file or directory
+./benchmark.sh: line 223: bc: command not found
+```
+
+**Solution:**
+
+```bash
+# Ubuntu/Debian
+apt update && apt install -y bc time
+
+# RHEL/CentOS/Fedora
+yum install -y bc time
+
+# Alpine
+apk add bc coreutils
+
+# Verify installation
+which bc time
+```
+
+---
+
 ### Script Fails to Run
 
 ```bash
@@ -374,7 +410,7 @@ crontab -e
 chmod +x benchmark.sh
 
 # Check dependencies
-which cargo rustc bc
+which cargo rustc bc time
 
 # Run with verbose output
 bash -x benchmark.sh --quick

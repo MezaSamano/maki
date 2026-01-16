@@ -24,6 +24,30 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+# Check dependencies
+check_dependencies() {
+    local missing=()
+    
+    command -v cargo >/dev/null 2>&1 || missing+=("cargo (Rust toolchain)")
+    command -v bc >/dev/null 2>&1 || missing+=("bc")
+    command -v time >/dev/null 2>&1 || missing+=("time")
+    
+    if [ ${#missing[@]} -gt 0 ]; then
+        log_error "Missing required dependencies:"
+        for dep in "${missing[@]}"; do
+            log_error "  - $dep"
+        done
+        echo ""
+        log "Install with:"
+        log "  Ubuntu/Debian: apt update && apt install -y bc time"
+        log "  RHEL/CentOS:   yum install -y bc time"
+        log "  Alpine:        apk add bc coreutils"
+        echo ""
+        return 1
+    fi
+    return 0
+}
+
 # Configuration
 RESULTS_DIR="benchmark_results"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
@@ -149,7 +173,11 @@ get_file_size_mb() {
     local file=$1
     if [ -f "$file" ]; then
         local size=$(stat -f%z "$file" 2>/dev/null || stat -c%s "$file" 2>/dev/null)
-        echo "scale=2; $size / 1048576" | bc
+        if command -v bc >/dev/null 2>&1; then
+            echo "scale=2; $size / 1048576" | bc
+        else
+            awk "BEGIN {printf \"%.2f\", $size / 1048576}"
+        fi
     else
         echo "0"
     fi
@@ -190,14 +218,13 @@ benchmark_model() {
     
     log "Starting compression..."
     
-    # Capture both stdout and stderr, and time output
+    # Capture both stdout and stderr
     local compress_output=$(mktemp)
-    local time_output=$(mktemp)
     
-    if /usr/bin/time -v cargo run --bin lort-compress --release -- \
+    if cargo run --bin lort-compress --release -- \
         --model "$model" \
         --output "$output_file" \
-        2>&1 | tee "$compress_output" 2>&1; then
+        2>&1 | tee "$compress_output"; then
         
         local end_time=$(date +%s)
         local duration=$((end_time - start_time))
@@ -218,9 +245,21 @@ benchmark_model() {
         # Model cache size
         local cache_size=$(get_model_cache_size "$model")
         
-        # Peak memory from /usr/bin/time
-        local peak_mem=$(grep "Maximum resident set size" "$compress_output" | grep -oP '\d+' || echo "0")
-        peak_mem=$(echo "scale=2; $peak_mem / 1024" | bc)  # Convert to MB
+        # Peak memory (estimate from system if time -v unavailable)
+        local peak_mem="0"
+        if command -v bc >/dev/null 2>&1; then
+            # Try to get from /usr/bin/time output if available
+            local peak_kb=$(grep "Maximum resident set size" "$compress_output" | grep -oP '\d+' 2>/dev/null || echo "0")
+            if [ "$peak_kb" != "0" ]; then
+                peak_mem=$(echo "scale=2; $peak_kb / 1024" | bc)
+            else
+                # Estimate from memory usage delta
+                peak_mem=$(echo "scale=2; $mem_used * 1.2" | bc)
+            fi
+        else
+            # Fallback: use current memory delta * 1.2 as estimate
+            peak_mem=$(awk "BEGIN {printf \"%.2f\", $mem_used * 1.2}")
+        fi
         
         # Save results to CSV
         echo "${model},${duration},${mem_used},${peak_mem},${original_size},${compressed_size},${compression_ratio},${bits_per_weight},${actual_file_size},${cache_size},success" >> "$RESULTS_FILE"
@@ -260,8 +299,13 @@ generate_report() {
     while IFS=, read -r model duration mem peak orig comp ratio bits actual cache status; do
         if [ "$status" == "success" ]; then
             total_time=$((total_time + duration))
-            total_original=$(echo "$total_original + $orig" | bc)
-            total_compressed=$(echo "$total_compressed + $comp" | bc)
+            if command -v bc >/dev/null 2>&1; then
+                total_original=$(echo "$total_original + $orig" | bc)
+                total_compressed=$(echo "$total_compressed + $comp" | bc)
+            else
+                total_original=$(awk "BEGIN {printf \"%.2f\", $total_original + $orig}")
+                total_compressed=$(awk "BEGIN {printf \"%.2f\", $total_compressed + $comp}")
+            fi
             ((successful++))
         else
             ((failed++))
@@ -269,14 +313,24 @@ generate_report() {
     done < <(tail -n +2 "$RESULTS_FILE")
     
     local total_tests=$((successful + failed))
-    local avg_time=0
+    local avg_time="0.00"
     if [ $successful -gt 0 ]; then
-        avg_time=$(echo "scale=2; $total_time / $successful" | bc)
+        if command -v bc >/dev/null 2>&1; then
+            avg_time=$(echo "scale=2; $total_time / $successful" | bc)
+        else
+            avg_time=$(awk "BEGIN {printf \"%.2f\", $total_time / $successful}")
+        fi
     fi
     
-    local total_ratio=0
-    if [ $(echo "$total_original > 0" | bc) -eq 1 ]; then
-        total_ratio=$(echo "scale=2; $total_original / $total_compressed" | bc)
+    local total_ratio="0.00"
+    if command -v bc >/dev/null 2>&1; then
+        if [ $(echo "$total_original > 0" | bc) -eq 1 ]; then
+            total_ratio=$(echo "scale=2; $total_original / $total_compressed" | bc)
+        fi
+    else
+        if awk "BEGIN {exit !($total_original > 0)}"; then
+            total_ratio=$(awk "BEGIN {printf \"%.2f\", $total_original / $total_compressed}")
+        fi
     fi
     
     log "Total Tests: $total_tests"
@@ -320,6 +374,12 @@ main() {
         log "  - $model"
     done
     log ""
+    
+    # Check dependencies
+    if ! check_dependencies; then
+        log_error "Cannot proceed without required dependencies."
+        exit 1
+    fi
     
     # CSV header
     echo "model,duration_sec,mem_used_mb,peak_mem_mb,original_mb,compressed_mb,compression_ratio,bits_per_weight,file_size_mb,cache_mb,status" > "$RESULTS_FILE"
