@@ -286,6 +286,44 @@ benchmark_model() {
         local mem_used=$((mem_after - mem_before))
         
         # Extract metrics from output
+        local original_size=$(grep "Original size:" "$compress_output" | grep -oP '\d+\.\d+' | head -1 || echo "0")
+        local compressed_size=$(grep "Compressed size:" "$compress_output" | grep -oP '\d+\.\d+' | head -1 || echo "0")
+        local compression_ratio=$(grep "Compression ratio:" "$compress_output" | grep -oP '\d+\.\d+' | head -1 || echo "0")
+        local bits_per_weight=$(grep "Bits per weight:" "$compress_output" | grep -oP '\d+\.\d+' | head -1 || echo "0")
+        
+        # Actual file size
+        local actual_file_size=$(get_file_size_mb "$output_file")
+        
+        # Model cache size
+        local cache_size=$(get_model_cache_size "$model")
+        
+        # Peak memory (estimate from system if time -v unavailable)
+        local peak_mem="0"
+        if command -v bc >/dev/null 2>&1; then
+            # Try to get from /usr/bin/time output if available
+            local peak_kb=$(grep "Maximum resident set size" "$compress_output" | grep -oP '\d+' 2>/dev/null || echo "0")
+            if [ "$peak_kb" != "0" ]; then
+                peak_mem=$(echo "scale=2; $peak_kb / 1024" | bc)
+            else
+                # Estimate from memory usage delta
+                peak_mem=$(echo "scale=2; $mem_used * 1.2" | bc)
+            fi
+        else
+            # Fallback: use current memory delta * 1.2 as estimate
+            peak_mem=$(awk "BEGIN {printf \"%.2f\", $mem_used * 1.2}")
+        fi
+        
+        # Save results to CSV
+        echo "${model},${duration},${mem_used},${peak_mem},${original_size},${compressed_size},${compression_ratio},${bits_per_weight},${actual_file_size},${cache_size},success" >> "$RESULTS_FILE"
+        
+        log_success "Compression complete!"
+        log "  Time: ${duration}s ($(printf '%02d:%02d:%02d' $((duration/3600)) $((duration%3600/60)) $((duration%60))))"
+        log "  Original: ${original_size} MB"
+        log "  Compressed: ${compressed_size} MB (actual: ${actual_file_size} MB)"
+        log "  Ratio: ${compression_ratio}x"
+        log "  Bits/weight: ${bits_per_weight}"
+        log "  Memory used: ${mem_used} MB (peak: ${peak_mem} MB)"
+        
         # Measure perplexity if requested
         if [ "$MEASURE_PPL" = true ]; then
             measure_perplexity "$model" "$output_file"
@@ -336,36 +374,53 @@ measure_perplexity() {
         log_warning "Perplexity measurement failed"
     fi
     
-    rm -f "$ppl_output Model cache size
-        local cache_size=$(get_model_cache_size "$model")
+    rm -f "$ppl_output"
+}
+
+# Benchmark wrapper - processes models list
+run_benchmarks() {
+    local models=("$@")
+    
+    for model in "${models[@]}"; do
+        benchmark_model "$model"
+    done
+}
+
+# Generate summary report
+generate_report() {
+    if [ ! -f "$RESULTS_FILE" ]; then
+        log_error "No results file found: $RESULTS_FILE"
+        return 1
+    fi
+    
+    log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    log "${YELLOW}BENCHMARK SUMMARY${NC}"
+    log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    # Count successful vs failed
+    local total=$(wc -l < "$RESULTS_FILE")
+    local successful=$(grep -c "success\|skipped" "$RESULTS_FILE" || echo "0")
+    local failed=$((total - successful))
+    
+    log "Models tested: ${total}"
+    log "Successful: ${GREEN}${successful}${NC}"
+    if [ "$failed" -gt 0 ]; then
+        log "Failed: ${RED}${failed}${NC}"
+    fi
+    
+    log ""
+    
+    # Calculate totals (skip header and failed runs)
+    if command -v bc >/dev/null 2>&1; then
+        local total_time=$(awk -F',' '$11=="success" {sum+=$2} END {print sum}' "$RESULTS_FILE")
+        local total_original=$(awk -F',' '$11=="success" {sum+=$5} END {print sum}' "$RESULTS_FILE")
+        local total_compressed=$(awk -F',' '$11=="success" {sum+=$6} END {print sum}' "$RESULTS_FILE")
+        local avg_ratio=$(echo "scale=2; $total_original / $total_compressed" | bc)
         
-        # Peak memory (estimate from system if time -v unavailable)
-        local peak_mem="0"
-        if command -v bc >/dev/null 2>&1; then
-            # Try to get from /usr/bin/time output if available
-            local peak_kb=$(grep "Maximum resident set size" "$compress_output" | grep -oP '\d+' 2>/dev/null || echo "0")
-            if [ "$peak_kb" != "0" ]; then
-                peak_mem=$(echo "scale=2; $peak_kb / 1024" | bc)
-            else
-                # Estimate from memory usage delta
-                peak_mem=$(echo "scale=2; $mem_used * 1.2" | bc)
-            fi
-        else
-            # Fallback: use current memory delta * 1.2 as estimate
-            peak_mem=$(awk "BEGIN {printf \"%.2f\", $mem_used * 1.2}")
-        fi
-        
-        # Save results to CSV
-        echo "${model},${duration},${mem_used},${peak_mem},${original_size},${compressed_size},${compression_ratio},${bits_per_weight},${actual_file_size},${cache_size},success" >> "$RESULTS_FILE"
-        
-        log_success "Compression complete!"
-        log "  Time: ${duration}s ($(printf '%02d:%02d:%02d' $((duration/3600)) $((duration%3600/60)) $((duration%60))))"
-        log "  Original: ${original_size} MB"
-        log "  Compressed: ${compressed_size} MB (actual: ${actual_file_size} MB)"
-        log "  Ratio: ${compression_ratio}x"
-        log "  Bits/weight: ${bits_per_weight}"
-        log "  Memory used: ${mem_used} MB (peak: ${peak_mem} MB)"
-        
+        log "Total compression time: ${total_time}s"
+        log "Total original size: ${total_original} MB"
+        log "Total compressed size: ${total_compressed} MB"
+        log "Average compression ratio: ${avg_ratio}x"
     else
         log_error "Compression failed for $model"
         echo "${model},0,0,0,0,0,0,0,0,0,failed" >> "$RESULTS_FILE"
