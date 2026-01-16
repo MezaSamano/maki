@@ -76,6 +76,8 @@ LARGE_MODELS=(
 # Parse arguments
 MODE="standard"
 CUSTOM_MODEL=""
+SKIP_COMPRESS=false
+MEASURE_PPL=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -92,7 +94,24 @@ while [[ $# -gt 0 ]]; do
             MODE="custom"
             shift 2
             ;;
-        --help)
+        --skip-compress)
+            SKIP_COMPRESS=true
+            shift
+            ;;
+        --benchmark-only)
+            SKIP_COMPRESS=true
+            shift
+            ;;skip-compress   Skip compression, use existing .lort files"
+            echo "  --benchmark-only  Same as --skip-compress"
+            echo "  --measure-ppl     Measure perplexity (requires Python & transformers)"
+            echo "  --help            Show this help"
+            echo ""
+            echo "Examples:"
+            echo "  ./benchmark.sh                           # Standard benchmark"
+            echo "  ./benchmark.sh --quick                   # Quick test"
+            echo "  ./benchmark.sh --model 'Qwen/Qwen2.5-0.5B'"
+            echo "  ./benchmark.sh --skip-compress           # Benchmark existing files"
+            echo "  ./benchmark.sh --measure-ppl             # Include perplexity metrics
             echo "LoRT Compression Benchmark Suite"
             echo ""
             echo "Usage: ./benchmark.sh [OPTIONS]"
@@ -205,7 +224,40 @@ benchmark_model() {
     local model=$1
     local output_name=$(echo "$model" | tr '/' '-')
     local output_file="${COMPRESSED_DIR}/${output_name}.lort"
+    Check if skipping compression
+    if [ "$SKIP_COMPRESS" = true ]; then
+        if [ ! -f "$output_file" ]; then
+            log_error "Compressed file not found: $output_file"
+            log_error "Run without --skip-compress first to create the file"
+            echo "${model},0,0,0,0,0,0,0,0,0,not_found" >> "$RESULTS_FILE"
+            return 1
+        fi
+        
+        log "Using existing compressed file: $output_file"
+        
+        # Get file info from existing file
+        local actual_file_size=$(get_file_size_mb "$output_file")
+        local cache_size=$(get_model_cache_size "$model")
+        
+        # Extract info from filename or use defaults
+        log "Skipping compression, analyzing existing file..."
+        
+        # Save minimal results
+        echo "${model},0,0,0,0,${actual_file_size},0,0,${actual_file_size},${cache_size},skipped" >> "$RESULTS_FILE"
+        
+        log_success "File analysis complete!"
+        log "  Compressed file: ${actual_file_size} MB"
+        log ""
+        
+        # Measure perplexity if requested
+        if [ "$MEASURE_PPL" = true ]; then
+            measure_perplexity "$model" "$output_file"
+        fi
+        
+        return 0
+    fi
     
+    # 
     log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     log "Benchmarking: ${YELLOW}${model}${NC}"
     log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -234,15 +286,57 @@ benchmark_model() {
         local mem_used=$((mem_after - mem_before))
         
         # Extract metrics from output
-        local original_size=$(grep "Original size" "$compress_output" | grep -oP '\d+\.\d+' | head -1 || echo "0")
-        local compressed_size=$(grep "Compressed size" "$compress_output" | grep -oP '\d+\.\d+' | head -1 || echo "0")
-        local compression_ratio=$(grep "Compression Ratio" "$compress_output" | grep -oP '\d+\.\d+' | head -1 || echo "0")
-        local bits_per_weight=$(grep "Bits per weight" "$compress_output" | grep -oP '\d+\.\d+' | head -1 || echo "0")
+        # Measure perplexity if requested
+        if [ "$MEASURE_PPL" = true ]; then
+            measure_perplexity "$model" "$output_file"
+        fi
         
-        # File size verification
-        local actual_file_size=$(get_file_size_mb "$output_file")
+    else
+        log_error "Compression failed for $model"
+        echo "${model},0,0,0,0,0,0,0,0,0,failed" >> "$RESULTS_FILE"
+    fi
+    
+    # Cleanup
+    rm -f "$compress_output" "$time_output"
+    
+    log ""
+}
+
+# Measure perplexity (requires Python script)
+measure_perplexity() {
+    local model=$1
+    local compressed_file=$2
+    
+    log "📊 Measuring perplexity..."
+    
+    # Check if Python is available
+    if ! command -v python3 >/dev/null 2>&1; then
+        log_warning "Python3 not found, skipping perplexity measurement"
+        return 1
+    fi
+    
+    # Check if evaluation script exists
+    if [ ! -f "evaluate_ppl.py" ]; then
+        log_warning "evaluate_ppl.py not found, skipping perplexity measurement"
+        log "  Create evaluate_ppl.py to enable perplexity testing"
+        return 1
+    fi
+    
+    # Run perplexity evaluation
+    local ppl_output=$(mktemp)
+    if python3 evaluate_ppl.py --model "$model" --compressed "$compressed_file" 2>&1 | tee "$ppl_output"; then
+        local original_ppl=$(grep "Original PPL:" "$ppl_output" | grep -oP '\d+\.\d+' || echo "N/A")
+        local compressed_ppl=$(grep "Compressed PPL:" "$ppl_output" | grep -oP '\d+\.\d+' || echo "N/A")
+        local ppl_delta=$(grep "Delta:" "$ppl_output" | grep -oP '\d+\.\d+' || echo "N/A")
         
-        # Model cache size
+        log "  Original PPL: ${original_ppl}"
+        log "  Compressed PPL: ${compressed_ppl}"
+        log "  Delta: ${ppl_delta}"
+    else
+        log_warning "Perplexity measurement failed"
+    fi
+    
+    rm -f "$ppl_output Model cache size
         local cache_size=$(get_model_cache_size "$model")
         
         # Peak memory (estimate from system if time -v unavailable)
@@ -289,6 +383,8 @@ generate_report() {
     log "Benchmark Summary"
     log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     
+    [ "$SKIP_COMPRESS" = true ] && log "Skip Compression: ${YELLOW}YES${NC} (using existing files)"
+    [ "$MEASURE_PPL" = true ] && log "Measure Perplexity: ${YELLOW}YES${NC}"
     # Calculate totals
     local total_time=0
     local total_original=0

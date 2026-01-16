@@ -90,6 +90,44 @@ Test specific model:
 
 ---
 
+### 5. Benchmark Existing Files (Skip Compression)
+
+Re-run benchmarks on already compressed models:
+
+```bash
+# Use existing .lort files in benchmark_results/compressed/
+./benchmark.sh --skip-compress
+
+# Or use --benchmark-only (same thing)
+./benchmark.sh --benchmark-only
+```
+
+**Use case**: Re-analyze existing compressions, compare across runs
+
+---
+
+### 6. Measure Perplexity (Quality Metrics)
+
+Include perplexity measurements to evaluate compression quality:
+
+```bash
+# Compress and measure perplexity
+./benchmark.sh --quick --measure-ppl
+
+# Measure perplexity on existing files
+./benchmark.sh --skip-compress --measure-ppl
+```
+
+**Requirements**: Python 3, transformers, torch, datasets
+
+```bash
+pip install transformers torch datasets
+```
+
+**Use case**: Evaluate model quality degradation from compression
+
+---
+
 ## What Gets Measured
 
 Each benchmark tracks:
@@ -106,6 +144,12 @@ Each benchmark tracks:
 | **File Size** | Actual .lort file size on disk (MB) |
 | **Cache Size** | HuggingFace cache usage (MB) |
 | **Status** | Success or failure |
+| **Perplexity** | Model quality metric (lower is better) - optional |
+
+**Perplexity** measures how well the model predicts text. Lower values = better quality. With `--measure-ppl`, benchmark tracks:
+- Original model perplexity
+- Compressed model perplexity (estimated)
+- Quality degradation from compression
 
 ---
 
@@ -435,7 +479,33 @@ Check logs in `benchmark_results/benchmark_TIMESTAMP.log`:
 
 ```bash
 # View latest log
-tail -f benchmark_results/benchmark_*.log
+tai
+
+### Perplexity Measurement Issues
+
+**Symptoms:**
+```
+⚠ datasets library not installed
+⚠ transformers library not installed
+```
+
+**Solution:**
+
+```bash
+# Install required Python packages
+pip3 install transformers torch datasets
+
+# Or use conda
+conda install -c huggingface transformers
+conda install pytorch -c pytorch
+conda install datasets -c huggingface
+```
+
+**Note**: Perplexity measurement currently provides estimates. Full implementation requires:
+- Python bindings for LoRT decompression
+- Integration with inference engine
+
+---l -f benchmark_results/benchmark_*.log
 
 # Search for errors
 grep -i error benchmark_results/benchmark_*.log
@@ -480,18 +550,23 @@ ssh user@cloud-instance
 # 2. Setup
 git clone https://github.com/MezaSamano/maki.git
 cd maki
-cargo build --bin lort-compress --release
+cargo build --bin l with perplexity
+pip install transformers torch datasets  # For PPL measurement
+./benchmark.sh --standard --measure-ppl
+# ✓ 3 models in 28 minutes + PPL measurements
 
-# 3. Quick validation
-./benchmark.sh --quick
-# ✓ Qwen 0.5B: 2min, 7.2x ratio
+# 5. Re-run analysis without re-compressing
+./benchmark.sh --skip-compress --measure-ppl
+# ✓ Uses existing .lort files
 
-# 4. Full benchmark
-./benchmark.sh --standard
-# ✓ 3 models in 28 minutes
-
-# 5. Analyze
+# 6. Analyze
 python3 analyze_benchmark.py benchmark_results/results_*.csv
+# Shows detailed stats
+
+# 7. Download results (from local machine)
+scp user@cloud-instance:~/maki/benchmark_results/*.csv ./
+
+# 8hon3 analyze_benchmark.py benchmark_results/results_*.csv
 # Shows detailed stats
 
 # 6. Download results (from local machine)
