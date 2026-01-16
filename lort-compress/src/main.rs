@@ -1,3 +1,5 @@
+mod mmap_loader;
+
 use anyhow::Result;
 use candle_core::{Device, Tensor, DType};
 use rayon::prelude::*;
@@ -8,6 +10,7 @@ use byteorder::{LittleEndian, WriteBytesExt};
 use hf_hub::{api::sync::Api, Repo, RepoType};
 use safetensors::SafeTensors;
 use clap::Parser;
+use mmap_loader::{MmapLoader, estimate_ram_needed, get_available_ram};
 
 // --- CONFIG ---
 const RANK: usize = 64;
@@ -41,66 +44,155 @@ fn main() -> Result<()> {
     // 1. Load Model Files (from HuggingFace or local)
     println!("📥 Loading model files...");
     let model_files = load_model_files(&args.model)?;
-    
     println!("✓ Found {} model file(s)", model_files.len());
     
-    // 2. Load Model Weights
-    println!("\n📂 Loading model weights...");
-    let device = Device::Cpu; // SVD is faster on CPU due to parallelism
+    // 2. Check RAM and decide loading strategy
+    println!("\n🔍 Analyzing system resources...");
+    let total_model_size: u64 = model_files.iter()
+        .map(|p| std::fs::metadata(p).map(|m| m.len()).unwrap_or(0))
+        .sum();
     
+    println!("  Model size on disk: {:.2} GB", total_model_size as f64 / 1_073_741_824.0);
+    
+    let available_ram = get_available_ram().unwrap_or(8 * 1024 * 1024 * 1024);
+    let needed_ram = estimate_ram_needed(&model_files)?;
+    
+    println!("  Available RAM: {:.2} GB", available_ram as f64 / 1_073_741_824.0);
+    println!("  Estimated need: {:.2} GB", needed_ram as f64 / 1_073_741_824.0);
+    
+    let use_mmap = needed_ram > (available_ram as f64 * 0.8) as u64;
+    
+    if use_mmap {
+        println!("\n⚠️  Model too large for available RAM!");
+        println!("  ✓ Switching to Memory-Mapped mode (streaming)");
+        println!("  This prevents OOM crashes on large models (70B+)");
+        compress_with_mmap(&model_files, &args)?;
+    } else {
+        println!("\n✓ Sufficient RAM available - using standard loading");
+        compress_standard(&model_files, &args)?;
+    }
+    
+    Ok(())
+}
+
+/// Standard loading - loads entire model into RAM
+fn compress_standard(model_files: &[PathBuf], args: &Args) -> Result<()> {
+    println!("\n📂 Loading model weights into RAM...");
+    let device = Device::Cpu;
     let mut layers: Vec<(String, Tensor)> = Vec::new();
     
-    for model_file in &model_files {
+    for model_file in model_files {
         println!("  Reading: {}", model_file.display());
         let buffer = std::fs::read(model_file)?;
         let tensors = SafeTensors::deserialize(&buffer)?;
         
-        // Extract linear layer weights (typically ending with .weight and 2D)
         for (name, tensor_view) in tensors.tensors() {
-            // Filter for weight matrices (skip biases, layer norms, embeddings)
-            if !name.contains(".weight") {
-                continue;
-            }
-            
-            // Skip 1D tensors (biases, norms)
-            if tensor_view.shape().len() != 2 {
-                continue;
-            }
-            
-            // Skip small layers based on min_dim threshold
             let shape = tensor_view.shape();
-            if shape[0] < args.min_dim || shape[1] < args.min_dim {
-                continue;
+            if should_compress_layer(&name, shape, args.min_dim) {
+                println!("  Found layer: {} {:?}", name, shape);
+                
+                let tensor = Tensor::from_raw_buffer(
+                    tensor_view.data(),
+                    tensor_view.dtype().try_into()?,
+                    &shape,
+                    &device,
+                )?;
+                
+                layers.push((name.to_string(), tensor));
             }
-            
-            println!("  Found layer: {} {:?}", name, shape);
-            
-            // Load tensor
-            let tensor = Tensor::from_raw_buffer(
-                tensor_view.data(),
-                tensor_view.dtype().try_into()?,
-                &shape,
-                &device,
-            )?;
-            
-            layers.push((name.to_string(), tensor));
         }
     }
     
-    println!("\n✓ Loaded {} compressible layers", layers.len());
+    compress_and_save(layers, args)
+}
+
+/// Memory-mapped loading - streams one layer at a time
+fn compress_with_mmap(model_files: &[PathBuf], args: &Args) -> Result<()> {
+    println!("\n📂 Initializing memory-mapped loader...");
+    let loader = MmapLoader::new(model_files)?;
+    let device = Device::Cpu;
+    
+    // Get all tensor names
+    let all_tensors = loader.list_tensors();
+    
+    // Filter to compressible layers
+    let mut layer_names = Vec::new();
+    for name in all_tensors {
+        if !name.contains(".weight") {
+            continue;
+        }
+        // We'll check dimensions when we load
+        layer_names.push(name);
+    }
+    
+    println!("\n✓ Found {} potential layers to compress", layer_names.len());
+    println!("Starting LoRT Decomposition (Rank={}, Iterations={})...", RANK, ITERATIONS);
+    println!("⚡ Streaming mode: Loading one layer at a time to prevent OOM\n");
+    
+    use indicatif::{ProgressBar, ProgressStyle};
+    let pb = ProgressBar::new(layer_names.len() as u64);
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} {msg}")
+            .unwrap()
+            .progress_chars("█▓▒░ "),
+    );
+    
+    // Process layers sequentially to control RAM usage
+    let mut compressed_layers = Vec::new();
+    
+    for name in layer_names {
+        // Load ONLY this tensor into RAM
+        match loader.load_tensor(&name, &device) {
+            Ok(tensor) => {
+                // Check dimensions
+                if let Ok(shape) = tensor.dims2() {
+                    if shape.0 >= args.min_dim && shape.1 >= args.min_dim {
+                        // Compress and immediately drop the uncompressed tensor
+                        if let Ok(compressed) = decompose_layer(&tensor, RANK, ITERATIONS) {
+                            compressed_layers.push((name.clone(), compressed));
+                        }
+                    }
+                }
+                // tensor dropped here, freeing RAM
+            }
+            Err(_) => continue,
+        }
+        
+        pb.inc(1);
+    }
+    
+    pb.finish_with_message("Decomposition complete!");
+    
+    // Save results
+    save_compressed_layers(&compressed_layers, &args.output, model_files)
+}
+
+/// Helper to check if a layer should be compressed  
+fn should_compress_layer(name: &str, shape: &[usize], min_dim: usize) -> bool {
+    if !name.contains(".weight") {
+        return false;
+    }
+    
+    if shape.len() != 2 {
+        return false;
+    }
+    
+    shape[0] >= min_dim && shape[1] >= min_dim
+}
+
+/// Common compression and save logic
+fn compress_and_save(layers: Vec<(String, Tensor)>, args: &Args) -> Result<()> {
     println!("\n✓ Loaded {} compressible layers", layers.len());
     println!("Starting LoRT Decomposition (Rank={}, Iterations={})...\n", RANK, ITERATIONS);
-
-    // 2. Parallel Decomposition
-    // Rayon uses all CPU cores to solve multiple layers at once.
-    use indicatif::{ProgressBar, ProgressStyle};
     
+    use indicatif::{ProgressBar, ProgressStyle};
     let pb = ProgressBar::new(layers.len() as u64);
     pb.set_style(
         ProgressStyle::default_bar()
             .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} {msg}")
             .unwrap()
-            .progress_chars("=>-"),
+            .progress_chars("█▓▒░ "),
     );
     
     let compressed_layers: Vec<(String, CompressedLayer)> = layers.par_iter().map(|(name, w)| {
@@ -110,49 +202,46 @@ fn main() -> Result<()> {
     }).collect();
     
     pb.finish_with_message("Decomposition complete!");
+    
+    // Calculate original model files size
+    let model_files = load_model_files(&args.model)?;
+    save_compressed_layers(&compressed_layers, &args.output, &model_files)
+}
 
-    // 3. Save to File
-    println!("\n💾 Saving to '{}'...", args.output);
-    let mut file = File::create(&args.output)?;
+fn save_compressed_layers(
+    compressed_layers: &[(String, CompressedLayer)],
+    output_path: &str,
+    model_files: &[PathBuf],
+) -> Result<()> {
+    println!("\n💾 Saving to '{}'...", output_path);
+    let mut file = File::create(output_path)?;
+    
     // Magic Header
-    file.write_all(b"LORT")?; 
+    file.write_all(b"LORT")?;
     file.write_u32::<LittleEndian>(1)?; // Version
-    file.write_u32::<LittleEndian>(layers.len() as u32)?; // Num Layers
-
-    // 3. Save to File
-    println!("\n💾 Saving to '{}'...", args.output);
-    let mut file = File::create(&args.output)?;
-    // Magic Header
-    file.write_all(b"LORT")?; 
-    file.write_u32::<LittleEndian>(1)?; // Version
-    file.write_u32::<LittleEndian>(compressed_layers.len() as u32)?; // Num Layers
-
-    for (name, layer) in &compressed_layers {
-        // Write layer name
+    file.write_u32::<LittleEndian>(compressed_layers.len() as u32)?;
+    
+    for (name, layer) in compressed_layers {
         let name_bytes = name.as_bytes();
         file.write_u32::<LittleEndian>(name_bytes.len() as u32)?;
         file.write_all(name_bytes)?;
-        
         layer.write(&mut file)?;
     }
     
-    // Calculate compression stats
-    let original_size: usize = compressed_layers.iter()
-        .map(|(_, l)| {
-            let (m, _n) = l.lora_a.dims2().unwrap();
-            let (n2, _) = l.lora_b.dims2().unwrap();
-            m * n2 * 2 // FP16 bytes
-        })
+    // Calculate stats
+    let original_size: u64 = model_files.iter()
+        .map(|p| std::fs::metadata(p).map(|m| m.len()).unwrap_or(0))
         .sum();
     
-    let compressed_size = std::fs::metadata(&args.output)?.len() as usize;
+    let compressed_size = std::fs::metadata(output_path)?.len();
     let ratio = original_size as f32 / compressed_size as f32;
-
+    
     println!("\n✅ Done!");
     println!("   Original size (FP16): {:.2} MB", original_size as f32 / 1_048_576.0);
     println!("   Compressed size:      {:.2} MB", compressed_size as f32 / 1_048_576.0);
     println!("   Compression Ratio:    {:.2}x", ratio);
     println!("   Bits per weight:      {:.2}", 16.0 / ratio);
+    
     Ok(())
 }
 

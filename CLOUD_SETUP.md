@@ -132,6 +132,45 @@ ssh root@your-server-ip
 **Cost**: Varies, free tier available
 </details>
 
+<details>
+<summary><b>RunPod</b> (Great for GPU + CPU)</summary>
+
+**For CPU-only compression:**
+
+1. Go to https://www.runpod.io/console/pods
+2. Click "Deploy" or "GPU Pods"
+3. Select "CPU" tab (cheaper for compression-only)
+4. Choose template:
+   - **RunPod Ubuntu** or **PyTorch** (both work)
+5. Select CPU specs:
+   - 8 vCPU, 16GB RAM recommended
+6. Volume: 50GB container disk
+7. Deploy
+
+**For GPU inference testing:**
+
+1. Filter by GPU type (RTX 3090/4090 recommended)
+2. Select "Secure Cloud" or "Community Cloud" (Community is cheaper)
+3. Choose Ubuntu template
+4. Deploy
+
+**SSH Access:**
+```bash
+# RunPod provides direct SSH command in pod details
+ssh root@<pod-id>.<region>.runpod.io -p <port> -i ~/.ssh/id_runpod
+
+# Or use RunPod's web terminal (click "Connect" button)
+```
+
+**Cost**: 
+- CPU (8 vCPU, 16GB): ~$0.06-0.10/hour
+- RTX 3090: ~$0.34-0.44/hour (Community Cloud)
+- RTX 4090: ~$0.69-0.79/hour (Community Cloud)
+- A100 40GB: ~$1.39/hour (Secure Cloud)
+
+💡 **Best for**: GPU inference testing at competitive prices
+</details>
+
 ### Step 2: Connect to Your Instance (1 minute)
 
 ```bash
@@ -686,11 +725,12 @@ aws ec2 terminate-instances --instance-ids i-xxxxx
 **GCP:**
 ```bash
 gcloud compute instances delete lort-test --zone=us-central1-a
-```
+``RunPod | CPU 8c/16GB | $0.08 | $0.16 |
+| DigitalOcean | Basic 16GB | $0.09 | $0.18 |
+| AWS | t3.xlarge | $0.17 | $0.34 |
+| GCP | n2-standard-4 | $0.19 | $0.38 |
 
-**DigitalOcean/Hetzner/Paperspace:**
-- Use web interface to delete/destroy instance
-
+💡 **Tip:** Hetzner offers the best value. RunPod is great for GPU testing
 ---
 
 ## ✅ Verification Checklist

@@ -15,3 +15,4 @@ indicatif = { workspace = true }
 hf-hub = { workspace = true }
 safetensors = { workspace = true }
 clap = { workspace = true }
+memmap2 = "0.9"
