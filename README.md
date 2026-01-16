@@ -2,14 +2,35 @@
 
 A state-of-the-art quantization engine achieving ~2.2 bits/weight with CUDA-accelerated inference.
 
+## 📖 Documentation
+
+- **[CLOUD_SETUP.md](CLOUD_SETUP.md)** - Complete guide for testing on cloud instances ⭐ **Start here!**
+- **[EXAMPLES.md](EXAMPLES.md)** - Usage examples and common patterns
+- **[UPDATES.md](UPDATES.md)** - Recent features and improvements
+
 ## Architecture
 
 This workspace contains two binaries:
 
-- **lort-compress**: Offline parallel solver that decomposes model weights using SVD and ternary quantization
+- **lort-compress**: Offline parallel solver that decomposes model weights using iterative optimization and ternary quantization
 - **lort-infer**: Online inference engine with custom CUDA kernels for high-performance execution
 
-## Quick Start
+## 🚀 Quick Start
+
+### Cloud Testing (Recommended)
+
+For step-by-step cloud instance setup with HuggingFace models, see **[CLOUD_SETUP.md](CLOUD_SETUP.md)**.
+
+**TL;DR:**
+```bash
+# On any Ubuntu cloud instance:
+git clone https://github.com/MezaSamano/maki.git
+cd maki
+cargo build --bin lort-compress --release
+cargo run --bin lort-compress --release -- --model "Qwen/Qwen2.5-0.5B"
+```
+
+### Local Setup
 
 ### 1. Compile CUDA Kernel (Optional - for inference)
 
