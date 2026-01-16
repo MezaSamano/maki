@@ -197,6 +197,7 @@ Copy and paste this entire block:
 sudo apt update && sudo apt upgrade -y
 
 # Install build essentials
+# ⚠️ CRITICAL: These are required for Rust compilation
 sudo apt install -y \
   build-essential \
   curl \
@@ -216,6 +217,7 @@ echo "✅ Checking installations..."
 rustc --version
 cargo --version
 git --version
+pkg-config --version
 ```
 
 **Expected output:**
@@ -223,6 +225,17 @@ git --version
 ✅ Checking installations...
 rustc 1.xx.x (xxxxxxxxx 20xx-xx-xx)
 cargo 1.xx.x (xxxxxxxxx 20xx-xx-xx)
+git version 2.xx.x
+pkg-config 0.xx.x
+```
+
+**What these dependencies do:**
+- `build-essential`: GCC compiler and essential build tools
+- `pkg-config`: Finds library paths (required for OpenSSL linking)
+- `libssl-dev`: OpenSSL development libraries (required for HTTPS/HuggingFace downloads)
+- `curl`: Downloads Rust installer
+- `git`: Clones the repository
+- `htop`: Resource monitoring (optional but useful)
 git version 2.xx.x
 ```
 
@@ -600,26 +613,43 @@ cargo run --bin lort-compress --release -- --model ./models/qwen
 **Symptoms:**
 ```
 error: could not compile `lort-compress`
+error: failed to run custom build command for `openssl-sys`
+Could not find directory of OpenSSL installation
 ```
 
 **Solutions:**
 
-1. **Update Rust:**
+1. **Install missing dependencies (most common):**
+```bash
+# Ubuntu/Debian
+sudo apt update
+sudo apt install -y build-essential pkg-config libssl-dev
+
+# Then rebuild
+cargo clean
+cargo build --bin lort-compress --release
+```
+
+2. **Update Rust:**
 ```bash
 rustup update stable
 rustc --version
-```
-
-2. **Clean and rebuild:**
-```bash
-cargo clean
-cargo build --bin lort-compress --release
 ```
 
 3. **Check disk space:**
 ```bash
 df -h
 # Need at least 5GB free for build
+```
+
+4. **If still failing, check specific error:**
+```bash
+# For OpenSSL errors on other distros:
+# RHEL/CentOS/Fedora
+sudo yum install -y gcc pkg-config openssl-devel
+
+# Alpine
+sudo apk add build-base pkgconfig openssl-dev
 ```
 
 ---
