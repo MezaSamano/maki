@@ -1,0 +1,17 @@
+[package]
+name = "lort-compress"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+candle-core = { workspace = true }
+candle-nn = { workspace = true }
+candle-transformers = { workspace = true }
+half = { workspace = true }
+anyhow = { workspace = true }
+rayon = { workspace = true }
+byteorder = { workspace = true }
+indicatif = { workspace = true }
+hf-hub = { workspace = true }
+safetensors = { workspace = true }
+clap = { workspace = true }

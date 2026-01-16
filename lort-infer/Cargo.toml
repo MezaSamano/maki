@@ -1,0 +1,11 @@
+[package]
+name = "lort-infer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+candle-core = { workspace = true }
+candle-nn = { workspace = true }
+half = { workspace = true }
+anyhow = { workspace = true }
+byteorder = { workspace = true }

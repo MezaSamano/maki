@@ -1,0 +1,17 @@
+[workspace]
+members = ["lort-compress", "lort-infer"]
+
+[workspace.dependencies]
+candle-core = "0.9"
+candle-nn = "0.9"
+candle-transformers = "0.9"
+half = "2.3"
+anyhow = "1.0"
+rayon = "1.8"
+byteorder = "1.5"
+memmap2 = "0.9"
+clap = { version = "4.4", features = ["derive"] }
+indicatif = "0.17" # Progress bars
+hf-hub = "0.3"
+tokenizers = "0.15"
+safetensors = "0.4"
