@@ -662,6 +662,30 @@ sudo yum install -y gcc pkg-config openssl-devel
 
 # Alpine
 sudo apk add build-base pkgconfig openssl-dev
+
+# If running as root in Docker (no sudo available):
+apt install -y build-essential pkg-config libssl-dev
+```
+
+---
+
+### Problem: "sudo: command not found"
+
+**Symptoms:**
+```
+bash: sudo: command not found
+```
+
+**Cause:** You're running as root in a Docker container or minimal environment where `sudo` isn't installed.
+
+**Solution:** Remove `sudo` from all commands:
+
+```bash
+# Instead of: sudo apt install ...
+# Use: apt install ...
+
+apt update && apt upgrade -y
+apt install -y build-essential curl git pkg-config libssl-dev
 ```
 
 ---
