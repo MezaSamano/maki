@@ -9,6 +9,11 @@ Complete guide for running and analyzing LoRT compression benchmarks in cloud en
 # Ubuntu/Debian:
 apt update && apt install -y bc time
 
+# For perplexity measurement (--measure-ppl)
+apt install -y python3-pip python3-venv
+pip3 install --upgrade pip
+pip3 install transformers torch datasets
+
 # RHEL/CentOS/Fedora:
 yum install -y bc time
 

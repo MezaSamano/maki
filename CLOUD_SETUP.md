@@ -16,8 +16,10 @@ This guide will take you from a fresh cloud instance to successfully compressing
 
 ## Prerequisites
 
+
 - Access to any cloud provider (AWS, GCP, DigitalOcean, Hetzner, Paperspace, etc.)
-- Basic SSH knowledge
+apt install -y build-essential curl git pkg-config libssl-dev bc time htop
+
 - Credit card for cloud billing (most offer free credits)
 
 **No GPU needed** for compression! CPU-only instances work great.
@@ -1267,6 +1269,15 @@ sudo apt install -y build-essential pkg-config libssl-dev git
 
 # 4. Clone repo
 echo "Step 4: Cloning repository..."
+
+**Optional but recommended (for perplexity measurement `--measure-ppl`):**
+
+```bash
+# Python 3 + PPL dependencies
+apt install -y python3-pip python3-venv
+pip3 install --upgrade pip
+pip3 install transformers torch datasets
+```
 cd ~
 if [ ! -d "maki" ]; then
     git clone https://github.com/MezaSamano/maki.git
