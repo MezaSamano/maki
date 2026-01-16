@@ -220,6 +220,18 @@ git --version
 pkg-config --version
 ```
 
+**💡 Running as root in Docker/container?** Remove `sudo` from the commands:
+
+```bash
+# If you see "sudo: command not found", use these instead:
+apt update && apt upgrade -y
+apt install -y build-essential curl git pkg-config libssl-dev htop
+
+# Then continue with Rust installation (same as above)
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+source $HOME/.cargo/env
+```
+
 **Expected output:**
 ```
 ✅ Checking installations...
